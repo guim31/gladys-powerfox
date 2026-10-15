@@ -1,61 +1,188 @@
-# Demo Devices Template
+# powerfox
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+## Overview
 
-## What you get
+This integration brings the **powerfox poweropti** readers into Gladys. A poweropti is an optical reader
+clipped on the LED or the display of a meter (electricity, gas, water or heat), widely used in Germany and
+Austria. The integration reads the **powerfox cloud API** with your powerfox account, like the Home
+Assistant `powerfox` integration, and creates one Gladys device per reader:
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+- **electricity meter**: the instantaneous power (signed when the meter also feeds in: positive when you draw
+  from the grid, negative when you feed in), the **consumption index** and the **feed-in index**, in kWh,
+  which feed the Gladys energy tracking;
+- **water meter**: the cold and/or hot water index, in m³;
+- **heat meter**: the heat energy (kWh) and the heating water volume (m³);
+- **gas meter**: the gas used today and this hour (m³), and its cost today (€);
+- for every reader except gas: a **stale reading** flag, raised when powerfox says the last reading is old.
+
+It also offers a **dashboard widget** (power and energy of the day) and a **scene action** (the totals of
+the day, with a ready-made sentence for a message). The integration is **read only**: it never changes
+anything on your meters or in your powerfox account.
+
+> **Developed without the hardware**: this integration was written from the open-source `python-powerfox`
+> library and the real API responses published in its tests, without a poweropti or a powerfox account. Feedback welcome on the Gladys forum or in the GitHub issues.
+>
+> This integration is not affiliated with powerfox GmbH.
+
+## Requirements
+
+- Gladys Assistant **5.1.0** or later (5.2 recommended for the energy tracking).
+- A poweropti reader set up in the **powerfox app**, and the e-mail and password of that powerfox account.
+- Internet access from Gladys: the readings come from the powerfox cloud (`backend.powerfox.energy`).
 
 ## Configuration
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+1. In Gladys, open **Integrations**, find **powerfox** (or use **Install from GitHub** with
+   `https://github.com/guim31/gladys-powerfox`) and install it.
+2. In the **Configuration** of the integration, enter:
+   - **E-mail** and **Password**: the ones you use in the powerfox app;
+   - **Refresh interval**: how often each reader is read, from 10 seconds to 5 minutes (1 minute by default,
+     see [API quotas](#api-quotas));
+   - **Language of the names and messages**: the language of the names of the new devices and of the
+     sentence returned by the scene action (French by default).
+3. Click **Test the connection**: the message lists the readers of your account.
+4. Open the **Discover** tab and add the readers you want in Gladys. Only the added readers are read.
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+The password is stored in the Gladys configuration of the integration; it never appears in the logs.
 
-## Actions
+## Devices
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+Each reader becomes one device, named as in the powerfox app (or after its meter type and the end of its
+identifier when it has no name).
 
-## Scenes
+### Electricity meter
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+| Feature           | Gladys type                       | Unit | Notes                                                  |
+| ----------------- | --------------------------------- | ---- | ------------------------------------------------------ |
+| Power             | Grid power (import +, export −)   | W    | on a bidirectional meter; else "Power", always ≥ 0     |
+| Consumption index | Energy sensor, index              | kWh  | Gladys derives the 30-minute consumption and its cost  |
+| Feed-in index     | Energy production sensor, index   | kWh  | only on a bidirectional meter ("Prosumer" in powerfox) |
+| Stale reading     | Input (0 = up to date, 1 = stale) |      | the `Outdated` flag of powerfox                        |
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+**Energy tracking (Gladys 5.2)**: the consumption index is a cumulative energy index. When you add the
+device, Gladys creates by itself its **30-minute consumption** and its **cost** features, and attaches it to
+the main electric meter of the energy settings. The feed-in index feeds the production tracking (and the
+feed-in revenue). Nothing to configure in the integration.
 
-## Dashboard
+When the meter only shows the high and low tariff registers, the consumption index is their sum. A total
+at 0, or lower than the previous one (a reading glitch), is never published: Gladys would count it as a huge
+consumption.
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+### Water meter
+
+| Feature       | Gladys type                       | Unit |
+| ------------- | --------------------------------- | ---- |
+| Cold water    | Volume sensor                     | m³   |
+| Hot water     | Volume sensor                     | m³   |
+| Stale reading | Input (0 = up to date, 1 = stale) |      |
+
+A cold water meter has the cold water index only, a hot water meter the hot water index only, a combined
+meter both.
+
+### Heat meter
+
+| Feature              | Gladys type                       | Unit |
+| -------------------- | --------------------------------- | ---- |
+| Heat energy          | Counter                           | kWh  |
+| Heating water volume | Volume sensor                     | m³   |
+| Stale reading        | Input (0 = up to date, 1 = stale) |      |
+
+The heat energy is published as a counter, not as an energy index, on purpose: Gladys would attach an energy
+index to the main electric meter and count heat as electricity.
+
+### Gas meter
+
+| Feature        | Gladys type   | Unit |
+| -------------- | ------------- | ---- |
+| Gas today      | Volume sensor | m³   |
+| Gas this hour  | Volume sensor | m³   |
+| Gas cost today | Currency      | €    |
+
+The powerfox API gives no gas index, only the hourly report of the day: these values start again from 0 at
+midnight (time zone of Gladys). A gas meter is read every 5 minutes at most.
+
+## Widget
+
+**powerfox** widget: in the dashboard, add a widget, pick **powerfox** and choose a meter in its settings.
+
+- electricity: the live power, the energy **used today** and **fed in today** (bidirectional meter), the
+  time of the last reading and whether it is up to date;
+- gas: the gas of the day, of the hour and its cost;
+- water and heat: the indexes, the time of the last reading.
+
+The daily totals come from the powerfox report, read at most every 5 minutes; the widget refreshes every
+2 minutes, the power tile follows each reading.
+
+## Scene action
+
+**powerfox: energy of the day** (in the "Integrations" actions of the scene editor), for an electricity or gas
+meter. It reads the report of the day and gives the next steps of the scene:
+
+| Result                         | Meter       |
+| ------------------------------ | ----------- |
+| Electricity used today (kWh)   | electricity |
+| Electricity fed in today (kWh) | electricity |
+| Current power (W)              | electricity |
+| Gas used today (m³)            | gas         |
+| Gas cost today (€)             | gas         |
+| Summary sentence               | both        |
+
+The summary sentence reads "Today: 12.4 kWh used, 3.1 kWh fed in." in the language of the configuration. A
+water or heat meter, or a report that cannot be read, fails the action (the scene goes on, the result is
+empty). There is no scene trigger: the power, the indexes and the stale flag are device states, the device
+triggers of Gladys cover them.
+
+## Scene examples
+
+- **Daily message**: trigger "Every day at 21:00" → action **powerfox: energy of the day** on the electricity
+  meter → "Send a message" with the summary sentence.
+- **Use the surplus**: trigger on the electricity meter, "Power" below −1500 W (feeding in) → turn on the
+  dishwasher plug.
+- **Reader silent**: trigger on the meter, "Stale reading" equal to 1 → send a message "The poweropti stopped
+  reporting, check its batteries or its Wi-Fi".
+- **Expensive day**: every day at 22:00 → **powerfox: energy of the day** on the gas meter → "Continue only
+  if" the gas cost is above 10 → send a message.
+
+## API quotas
+
+powerfox does not publish a request quota for its API. The Home Assistant integration reads each reader every
+10 seconds; users reported `HTTP 429` refusals when asking very often. This integration stays well below:
+
+- one request per added reader and per refresh interval (1 minute by default, 10 seconds at least);
+- a gas meter every 5 minutes at most; the daily report of the widget and of the scene action every 5 minutes
+  at most per reader (1 minute for a scene);
+- the list of the readers at start, every 6 hours, and on demand (Discover tab, Test the connection);
+- after an `HTTP 429`, **no request at all** for the delay asked by powerfox (`Retry-After`), or for a pause
+  that doubles at each refusal, up to 30 minutes;
+- after a refused password (`HTTP 401`), no request until the configuration is saved again: retrying could
+  lock the account.
+
+The integration only reads the data of your own account, with your credentials, like the powerfox app.
 
 ## Troubleshooting
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+- **"powerfox refused the e-mail or the password"**: check them in the powerfox app, enter them again, save.
+- **"powerfox asks to slow down"**: choose a longer refresh interval; the readings start again by themselves
+  after the pause.
+- **"The powerfox cloud does not answer"**: the integration retries at each interval; check the internet
+  access of Gladys.
+- **A reader stays without values** and the logs say "the data transfer is denied in the powerfox app":
+  allow the data transfer of that reader in the privacy settings of the powerfox app.
+- **"Stale reading" at 1**: powerfox has no recent reading from the poweropti (batteries, Wi-Fi, reader
+  moved on the meter); the integration only reports it.
+- **Nothing in the Discover tab**: click **Test the connection**; a reader of an unknown type is ignored and
+  named in the logs of the integration (**Supervision** tab).
+
+The logs of the integration only show the start, the connection, the problems and their end. Each reading
+appears at the debug level (`LOG_LEVEL=debug`).
+
+## Limits
+
+- **Cloud only**: the integration uses the powerfox cloud API, not the local interface some readers offer.
+- **Read only**: nothing can be controlled from Gladys.
+- The **high and low tariff** registers are not published as separate features.
+- The **gas** meters have no index, only the totals of the day and of the hour; the heat meter deltas are not
+  published.
+- Costs are shown in **euros**, the currency of powerfox.
+- **Developed without the hardware**: the values were checked against the published responses of the API
+  only. Feedback welcome.

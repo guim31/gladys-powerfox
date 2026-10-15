@@ -1,93 +1,77 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createFakeGladys } from '@gladysassistant/integration-sdk/testing';
-import { DEVICE_BLUEPRINTS } from '../src/devices/index.js';
-import { MOTION_DETECTED_TRIGGER, motionSensor } from '../src/devices/motionSensor.js';
-import { SCENE_ACTIONS } from '../src/scenes.js';
-import { normalizeConfig } from '../src/config.js';
+import { ACCOUNT, IDS } from './helpers/fakePowerfox.js';
+import { SELECTOR, createWorld } from './helpers/world.js';
 
 const manifest = JSON.parse(
   await readFile(new URL('../gladys-assistant-integration.json', import.meta.url), 'utf8'),
 );
-const config = normalizeConfig();
+const declaredOutputs = new Set(
+  manifest.scene_actions
+    .find((action) => action.key === 'daily_energy')
+    .outputs.map((output) => output.key),
+);
+const deviceOf = (id) => `ext:${SELECTOR}:poweropti:${id}`;
 
-const declarationOf = (list, key) => manifest[list].find((entry) => entry.key === key);
-const keysOf = (list) => (list ?? []).map((entry) => entry.key);
-const deviceIdOf = (gladys, key) =>
-  DEVICE_BLUEPRINTS.find((bp) => bp.key === key).deviceExternalId(gladys);
+async function run(gladys, id) {
+  return gladys.fake.sceneAction('daily_energy', { device: deviceOf(id) });
+}
 
-// Let the async interval callback run to completion.
-const flush = () => new Promise((resolve) => setImmediate(resolve));
-
-test('the motion sensor fires one motion_detected event per detection, none on the clear', async (t) => {
-  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
-  const gladys = createFakeGladys();
-  const stopPush = motionSensor.startPush(gladys, config);
-  try {
-    t.mock.timers.tick(60_000);
-    await flush();
-    assert.equal(gladys.fake.sceneEvents.length, 1, 'one detection, one event');
-    assert.equal(gladys.fake.sceneEvents[0].key, MOTION_DETECTED_TRIGGER);
-    assert.equal(gladys.fake.states.at(-1).state, 1, 'the state is still published');
-
-    t.mock.timers.tick(10_000);
-    await flush();
-    assert.equal(gladys.fake.states.at(-1).state, 0, 'the detection is cleared');
-    assert.equal(gladys.fake.sceneEvents.length, 1, 'the clear fires no event');
-  } finally {
-    stopPush();
+test('electricity: the totals of the day, the power and a sentence for a message', async (t) => {
+  const { gladys, app } = await createWorld({ created: [IDS.prosumer] });
+  t.after(() => app.stop());
+  const ack = await run(gladys, IDS.prosumer);
+  assert.deepEqual(ack, {
+    success: true,
+    data: {
+      outputs: {
+        consumption_kwh: 0.12,
+        feed_in_kwh: 0,
+        power_w: 111,
+        summary: 'Aujourd’hui : 0,12 kWh consommés, 0 kWh injectés.',
+      },
+    },
+  });
+  for (const key of Object.keys(ack.data.outputs)) {
+    assert.ok(declaredOutputs.has(key), `output "${key}" is not declared in the manifest`);
   }
 });
 
-test('motion_detected data only carries keys the trigger declares', async (t) => {
-  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
-  const gladys = createFakeGladys();
-  const stopPush = motionSensor.startPush(gladys, config);
-  try {
-    t.mock.timers.tick(60_000);
-    await flush();
-  } finally {
-    stopPush();
-  }
-  const [{ data }] = gladys.fake.sceneEvents;
-  const trigger = declarationOf('scene_triggers', MOTION_DETECTED_TRIGGER);
-  // The core keeps the `fields` keys (filters) and the `variables` keys
-  // (exposed to the scene): any other key would be silently dropped.
-  const declared = [...keysOf(trigger.fields), ...keysOf(trigger.variables)];
-  for (const [key, value] of Object.entries(data)) {
-    assert.ok(declared.includes(key), `data.${key} is not declared, the core would drop it`);
-    assert.ok(value === null || typeof value !== 'object', `data.${key} must be a primitive`);
-  }
-  // A `"source": "devices"` filter stores a device external_id.
-  assert.equal(data.device, deviceIdOf(gladys, 'motion-sensor'));
-  const targets = trigger.fields.find((field) => field.key === 'target').options;
-  assert.ok(
-    targets.some((option) => option.value === data.target),
-    `data.target "${data.target}" must be one of the filter options`,
+test('gas: the volume of the day and its cost, in the configured language', async (t) => {
+  const { gladys, app } = await createWorld({
+    config: { ...ACCOUNT, language: 'de' },
+    created: [IDS.gas],
+  });
+  t.after(() => app.stop());
+  const ack = await run(gladys, IDS.gas);
+  // Intl puts a no-break space before the euro sign.
+  const summary = ack.data.outputs.summary.replace(/[\u00a0\u202f]/g, ' ');
+  assert.deepEqual(
+    { ...ack.data.outputs, summary },
+    { gas_m3: 11.32, gas_cost: 17.14, summary: 'Heute: 11,32 m³ Gas (17,14 €).' },
   );
 });
 
-test('identify_device signals the chosen device and returns the declared outputs', async () => {
-  const gladys = createFakeGladys();
-  const outputs = await SCENE_ACTIONS.identify_device(gladys, {
-    fields: { device: deviceIdOf(gladys, 'light') },
-    config,
+test('a water or heat meter, or an unknown one, fails the action with a clear message', async (t) => {
+  const { gladys, app } = await createWorld({
+    config: { ...ACCOUNT, language: 'en' },
+    created: [IDS.coldWater],
   });
-  assert.deepEqual(outputs, { signalled: true });
-  const declared = keysOf(declarationOf('scene_actions', 'identify_device').outputs);
-  for (const key of Object.keys(outputs)) {
-    assert.ok(declared.includes(key), `output "${key}" is not declared, the core would drop it`);
-  }
+  t.after(() => app.stop());
+  const water = await run(gladys, IDS.coldWater);
+  assert.equal(water.success, false);
+  assert.match(water.error, /Only the electricity and gas meters/);
+  const unknown = await run(gladys, 'ffffffffffff');
+  assert.equal(unknown.success, false);
+  assert.match(unknown.error, /not in the powerfox account/);
 });
 
-test('identify_device reports a device that cannot signal itself through its output', async () => {
-  // Not a failure: a scene action is never a condition, the scene author
-  // gates the following actions on the output instead.
-  const gladys = createFakeGladys();
-  const outputs = await SCENE_ACTIONS.identify_device(gladys, {
-    fields: { device: deviceIdOf(gladys, 'weather-station') },
-    config,
-  });
-  assert.deepEqual(outputs, { signalled: false });
+test('the report cannot be read: the action fails instead of giving zeros', async (t) => {
+  const { gladys, powerfox, app } = await createWorld({ created: [IDS.consumer] });
+  t.after(() => app.stop());
+  powerfox.failure = 'network';
+  const ack = await run(gladys, IDS.consumer);
+  assert.equal(ack.success, false);
+  assert.match(ack.error, /pas encore disponible/);
 });

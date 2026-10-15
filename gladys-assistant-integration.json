@@ -1,177 +1,313 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "powerfox",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "powerfox poweropti readers on electricity, gas, water and heat meters, via the powerfox cloud.",
+    "fr": "Lecteurs powerfox poweropti des compteurs d'électricité, gaz, eau et chaleur, via le cloud.",
+    "de": "powerfox poweropti-Leseköpfe an Strom-, Gas-, Wasser- und Wärmezählern, über die Cloud.",
+    "es": "Lectores powerfox poweropti de contadores de electricidad, gas, agua y calor, vía la nube."
   },
   "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "docker_image": "ghcr.io/guim31/gladys-powerfox:1.0.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/guim31/gladys-powerfox/main/cover.png",
+  "categories": ["energy"],
+  "transports": ["cloud"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your powerfox account",
+        "fr": "Votre compte powerfox",
+        "de": "Dein powerfox-Konto",
+        "es": "Su cuenta powerfox"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "The e-mail and the password of the powerfox app. The readings come from the powerfox cloud: the readers must be set up in the app first.",
+        "fr": "L'e-mail et le mot de passe de l'application powerfox. Les relevés viennent du cloud powerfox : les lecteurs doivent d'abord être installés dans l'application.",
+        "de": "Die E-Mail-Adresse und das Passwort der powerfox-App. Die Messwerte kommen aus der powerfox-Cloud: Die Leseköpfe müssen zuerst in der App eingerichtet sein.",
+        "es": "El correo electrónico y la contraseña de la aplicación powerfox. Las lecturas vienen de la nube powerfox: los lectores deben estar configurados antes en la aplicación."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://www.powerfox.energy",
+          "label": {
+            "en": "powerfox website",
+            "fr": "Site de powerfox",
+            "de": "powerfox-Website",
+            "es": "Sitio web de powerfox"
+          }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
-      "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+      "key": "email",
+      "type": "string",
+      "label": {
+        "en": "E-mail",
+        "fr": "E-mail",
+        "de": "E-Mail-Adresse",
+        "es": "Correo electrónico"
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+      "placeholder": {
+        "en": "name@example.com",
+        "fr": "nom@exemple.fr",
+        "de": "name@beispiel.de",
+        "es": "nombre@ejemplo.es"
+      },
+      "required": true
     },
     {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+      "key": "password",
+      "type": "secret",
+      "label": {
+        "en": "Password",
+        "fr": "Mot de passe",
+        "de": "Passwort",
+        "es": "Contraseña"
       },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
+      "required": true
     },
     {
-      "key": "unit",
+      "key": "refresh_interval",
       "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
+      "label": {
+        "en": "Refresh interval",
+        "fr": "Intervalle de rafraîchissement",
+        "de": "Aktualisierungsintervall",
+        "es": "Intervalo de actualización"
+      },
+      "description": {
+        "en": "One request per reader and per interval. Gas meters are read every 5 minutes at most.",
+        "fr": "Une requête par lecteur et par intervalle. Les compteurs de gaz sont lus toutes les 5 minutes au plus.",
+        "de": "Eine Anfrage pro Lesekopf und Intervall. Gaszähler werden höchstens alle 5 Minuten gelesen.",
+        "es": "Una solicitud por lector y por intervalo. Los contadores de gas se leen cada 5 minutos como máximo."
+      },
       "required": false,
-      "default": "celsius",
+      "default": "60",
       "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
+        {
+          "value": "10",
+          "label": {
+            "en": "10 seconds",
+            "fr": "10 secondes",
+            "de": "10 Sekunden",
+            "es": "10 segundos"
+          }
+        },
+        {
+          "value": "15",
+          "label": {
+            "en": "15 seconds",
+            "fr": "15 secondes",
+            "de": "15 Sekunden",
+            "es": "15 segundos"
+          }
+        },
+        {
+          "value": "30",
+          "label": {
+            "en": "30 seconds",
+            "fr": "30 secondes",
+            "de": "30 Sekunden",
+            "es": "30 segundos"
+          }
+        },
+        {
+          "value": "60",
+          "label": { "en": "1 minute", "fr": "1 minute", "de": "1 Minute", "es": "1 minuto" }
+        },
+        {
+          "value": "120",
+          "label": { "en": "2 minutes", "fr": "2 minutes", "de": "2 Minuten", "es": "2 minutos" }
+        },
+        {
+          "value": "300",
+          "label": { "en": "5 minutes", "fr": "5 minutes", "de": "5 Minuten", "es": "5 minutos" }
+        }
       ]
     },
     {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "key": "language",
+      "type": "select",
+      "label": {
+        "en": "Language of the names and messages",
+        "fr": "Langue des noms et des messages",
+        "de": "Sprache der Namen und Meldungen",
+        "es": "Idioma de los nombres y mensajes"
+      },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "Names of the new devices and texts of the scene action.",
+        "fr": "Noms des nouveaux appareils et textes de l'action de scène.",
+        "de": "Namen der neuen Geräte und Texte der Szenenaktion.",
+        "es": "Nombres de los nuevos dispositivos y textos de la acción de escena."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": "fr",
+      "options": [
+        {
+          "value": "en",
+          "label": { "en": "English", "fr": "Anglais", "de": "Englisch", "es": "Inglés" }
+        },
+        {
+          "value": "fr",
+          "label": { "en": "French", "fr": "Français", "de": "Französisch", "es": "Francés" }
+        },
+        {
+          "value": "de",
+          "label": { "en": "German", "fr": "Allemand", "de": "Deutsch", "es": "Alemán" }
+        },
+        {
+          "value": "es",
+          "label": { "en": "Spanish", "fr": "Espagnol", "de": "Spanisch", "es": "Español" }
+        }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
-      "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
-    {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
-      "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+      "key": "test_connection",
+      "label": {
+        "en": "Test the connection",
+        "fr": "Tester la connexion",
+        "de": "Verbindung testen",
+        "es": "Probar la conexión"
       },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
-          "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
+      "description": {
+        "en": "Signs in to powerfox now and lists the readers of the account.",
+        "fr": "Se connecte à powerfox maintenant et liste les lecteurs du compte.",
+        "de": "Meldet sich jetzt bei powerfox an und listet die Leseköpfe des Kontos auf.",
+        "es": "Se conecta ahora a powerfox y enumera los lectores de la cuenta."
+      },
+      "timeout_seconds": 60
     }
   ],
   "scene_actions": [
     {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
+      "key": "daily_energy",
+      "label": {
+        "en": "powerfox: energy of the day",
+        "fr": "powerfox : énergie du jour",
+        "de": "powerfox: Energie des Tages",
+        "es": "powerfox: energía del día"
       },
-      "timeout_seconds": 15,
+      "description": {
+        "en": "Reads today's totals of an electricity or gas meter, for the next steps of the scene.",
+        "fr": "Lit les totaux du jour d'un compteur d'électricité ou de gaz, pour la suite de la scène.",
+        "de": "Liest die heutigen Summen eines Strom- oder Gaszählers für die nächsten Schritte der Szene.",
+        "es": "Lee los totales del día de un contador de electricidad o de gas, para los siguientes pasos de la escena."
+      },
+      "timeout_seconds": 45,
       "fields": [
         {
           "key": "device",
           "type": "select",
           "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
+          "label": {
+            "en": "Meter",
+            "fr": "Compteur",
+            "de": "Zähler",
+            "es": "Contador"
+          },
           "required": true
         }
       ],
       "outputs": [
         {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
+          "key": "consumption_kwh",
+          "type": "number",
+          "label": {
+            "en": "Electricity used today (kWh)",
+            "fr": "Électricité consommée aujourd'hui (kWh)",
+            "de": "Heute bezogener Strom (kWh)",
+            "es": "Electricidad consumida hoy (kWh)"
+          }
+        },
+        {
+          "key": "feed_in_kwh",
+          "type": "number",
+          "label": {
+            "en": "Electricity fed in today (kWh)",
+            "fr": "Électricité injectée aujourd'hui (kWh)",
+            "de": "Heute eingespeister Strom (kWh)",
+            "es": "Electricidad vertida hoy (kWh)"
+          }
+        },
+        {
+          "key": "power_w",
+          "type": "number",
+          "label": {
+            "en": "Current power (W)",
+            "fr": "Puissance actuelle (W)",
+            "de": "Aktuelle Leistung (W)",
+            "es": "Potencia actual (W)"
+          }
+        },
+        {
+          "key": "gas_m3",
+          "type": "number",
+          "label": {
+            "en": "Gas used today (m³)",
+            "fr": "Gaz consommé aujourd'hui (m³)",
+            "de": "Heute verbrauchtes Gas (m³)",
+            "es": "Gas consumido hoy (m³)"
+          }
+        },
+        {
+          "key": "gas_cost",
+          "type": "number",
+          "label": {
+            "en": "Gas cost today (€)",
+            "fr": "Coût du gaz aujourd'hui (€)",
+            "de": "Gaskosten heute (€)",
+            "es": "Coste del gas hoy (€)"
+          }
+        },
+        {
+          "key": "summary",
+          "type": "string",
+          "label": {
+            "en": "Summary sentence",
+            "fr": "Phrase de résumé",
+            "de": "Zusammenfassung",
+            "es": "Frase de resumen"
+          }
         }
       ]
     }
   ],
   "widgets": [
     {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
+      "key": "energy_today",
+      "label": {
+        "en": "powerfox",
+        "fr": "powerfox",
+        "de": "powerfox",
+        "es": "powerfox"
       },
-      "icon": "activity",
-      "action_timeout_seconds": 15
+      "description": {
+        "en": "Live power and energy of the day of a meter, with the time of the last reading.",
+        "fr": "Puissance en direct et énergie du jour d'un compteur, avec l'heure de la dernière mesure.",
+        "de": "Live-Leistung und Tagesenergie eines Zählers, mit der Uhrzeit der letzten Messung.",
+        "es": "Potencia en directo y energía del día de un contador, con la hora de la última medición."
+      },
+      "icon": "zap",
+      "settings": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Meter",
+            "fr": "Compteur",
+            "de": "Zähler",
+            "es": "Contador"
+          },
+          "required": true
+        }
+      ]
     }
   ]
 }

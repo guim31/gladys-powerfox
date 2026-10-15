@@ -5,9 +5,10 @@ contributors.
 
 ## What this is
 
-A Gladys Assistant **external integration**: a Node.js service (Node 22+, ESM,
-no build step) that runs in its own sandboxed Docker container and talks to
-Gladys through
+A Gladys Assistant **external integration** for the **powerfox poweropti**
+meter readers, read through the powerfox cloud API: a Node.js service (Node
+22+, ESM, no build step) that runs in its own sandboxed Docker container and
+talks to Gladys through
 [`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js),
 its only runtime dependency. It started from the official JavaScript template.
 
@@ -17,11 +18,12 @@ its only runtime dependency. It started from the official JavaScript template.
 npm install
 npm test                                  # node --test, the built-in runner
 node --test test/devices.test.js          # one file
-node --test --test-name-pattern "plug"    # tests whose name matches
+node --test --test-name-pattern "gas"     # tests whose name matches
 npm run lint                              # ESLint
 npm run format:check                      # Prettier, as the CI runs it
 npm run format                            # Prettier, fix in place
 npx github:GladysAssistant/integration-store .   # store admission checks
+node scripts/probe.mjs                    # the real API: an invented account must get a 401
 ```
 
 The CI (`.github/workflows/ci.yml`) runs `format:check`, `lint` and `test` on
@@ -31,16 +33,21 @@ pushing.
 ## Architecture
 
 ```
-index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
+index.js                          SDK wiring only (src/app.js does the registration)
+src/app.js                        handlers registered before connect(), "Test the connection" action
+src/hub.js                        the account: discovery, own polling timer, backoff, connection status
+src/devices.js                    one Gladys device per reader (features, names in 4 languages, states)
+src/powerfox/client.js            powerfox cloud API client (Basic auth, error mapping)
+src/powerfox/model.js             API payloads → readings (never a 0 for a missing value)
+src/widgets.js                    dashboard widget `energy_today`
+src/scenes.js                     scene action `daily_energy`
+src/issues.js                     deduplicated problem logging (one line per outage)
 src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
+scripts/probe.mjs                 read-only probe of the real API (orchestrator, machine with network)
 gladys-assistant-integration.json manifest: name, config_schema, actions, image...
-docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
+docs/{en,fr,de,es}.md             user documentation, re-hosted by Gladys, same sections
+test/                             node --test, against the SDK's fake Gladys and a fake powerfox cloud
+test/fixtures/powerfox/           recorded API responses (python-powerfox, MIT), ids invented
 .github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
 ```
 
@@ -70,8 +77,10 @@ test/                             node --test, against the SDK's fake Gladys (in
   `type: "provider"`: 5.1.0). `test/manifest.test.js` ties the manifest to the
   code (defaults, action, scene and widget handlers): change both sides
   together.
-- **User-facing text** is bilingual (English and French): action messages,
-  manifest texts, and `docs/en.md` / `docs/fr.md`, kept in sync.
+- **User-facing text** exists in four languages (English, French, German with
+  "du", Spanish with "usted"): action messages, manifest texts, feature names,
+  widget and scene texts, and `docs/en.md`, `fr.md`, `de.md`, `es.md`, kept in
+  sync with the same sections. `test/i18n.test.js` enforces it.
 - **Style.** Prettier formats, ESLint catches mistakes. Comments explain why,
   in English. Tests never touch the network.
 
@@ -233,3 +242,40 @@ long, et sur un « Sie »/« Ihr… » de politesse en allemand. Le store exige 
 - Docs `en`, `fr`, `de`, `es` avec les mêmes sections.
 - Chauffe, ouverture, sécurité : ne rien rendre pilotable « comme un thermostat » ou par un assistant
   vocal quand une erreur serait dangereuse (leçon d'OctoPrint).
+
+## Intégration powerfox (propre à ce dépôt)
+
+**API** (`https://backend.powerfox.energy/api/2.0/`, HTTP Basic avec l'e-mail et le mot de passe de l'app) :
+`my/all/devices` (liste : `DeviceId`, `Name`, `Division`, `Prosumer`, `MainDevice`),
+`my/<id>/current?unit=kwh` (dernière mesure), `my/<id>/report?year=&month=&day=` (relevé horaire du jour).
+`my/main/current` existe aussi (lecteur principal), inutile ici. Réponses réelles dans
+`test/fixtures/powerfox` (tests de `python-powerfox`, MIT). L'API est **injoignable depuis une session de
+code** (proxy 403) : `scripts/probe.mjs` est lancé par l'orchestrateur.
+
+- `Division` : 0 électricité, 1 eau froide, 2 eau chaude, 3 chaleur, 4 gaz, 5 eau froide et chaude, -1 sans
+  type (ignoré, une ligne info). L'`external_id` est construit sur `DeviceId`.
+- **Un total à 0 signifie « pas de relevé »** (`A_Plus`, `A_Minus`, `KiloWattHour`…), comme le fait
+  python-powerfox : ne jamais le publier, un index qui retombe à 0 puis remonte compte tout l'index comme une
+  demi-heure de consommation dans le suivi d'énergie. Même chose pour un index en baisse (ignoré, accepté
+  après 10 lectures de suite : compteur remplacé). `A_Plus` à 0 avec `A_Plus_HT`/`A_Plus_NT` renseignés :
+  l'index est leur somme.
+- **Gaz** : `current` ne renvoie rien d'exploitable (python-powerfox lève `UnsupportedDevice`), seul le
+  `report` du jour donne `Gas.Sum` (m³), `CurrentConsumption` (heure en cours), `SumCurrency` (€). Pas
+  d'index de gaz : valeurs du jour, remises à 0 à minuit (fuseau `TZ` de Gladys). Lu toutes les 5 min au plus.
+- **Puissance signée** sur un compteur `Prosumer` : `grid-sensor/power` (import +, export −, bornes
+  symétriques ±20 kW). Sinon `energy-sensor/power`. La structure dépend du seul drapeau `Prosumer`, jamais
+  d'une mesure.
+- **Suivi d'énergie** : `energy-sensor/index` (A_Plus) est dérivé par le cœur (consommation 30 min + coût,
+  rattaché au compteur principal) ; `energy-production-sensor/index` (A_Minus) alimente le suivi de
+  production (`PRODUCTION_INDEX_FEATURE_TYPES`, présent dès la 5.1.0). L'énergie d'un **compteur de chaleur**
+  est un `counter-sensor/integer` en kWh, **pas** un `energy-sensor/index` : le cœur l'aurait rattachée au
+  compteur électrique principal et comptée comme de l'électricité. Les registres HT/NT ne sont pas publiés en
+  index séparés pour la même raison (double comptage).
+- **Quotas** : powerfox ne publie aucun quota. HA lit toutes les 10 s par lecteur ; des posts de forum
+  anciens parlent de 429 en dessous de 5 min. Défaut 60 s, choix 10 s à 5 min ; 429 → pause `Retry-After` ou
+  doublement jusqu'à 30 min ; 401 → plus aucune requête jusqu'à une nouvelle config (verrouillage du compte).
+  Un `StatusCode` ≥ 400 peut arriver **dans un HTTP 200** (412 = transfert de données refusé dans l'app).
+- `Outdated: true` → la fonctionnalité « Mesure périmée » passe à 1 et les valeurs n'ont plus de heartbeat
+  (Gladys garde leur date réelle) ; le drapeau, lui, garde son heartbeat.
+- Le faux Gladys du SDK expose `fake.states` **en copie** : on ne le vide pas, on compare des tranches.
+- Les montants `Intl.NumberFormat` en euros contiennent une espace insécable : normaliser dans les tests.
