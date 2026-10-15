@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-15
+
 ### Added
 
 - One Gladys device per powerfox poweropti reader of the account, read through
@@ -29,4 +31,5 @@ the notes of the version's GitHub Release.
   a powerfox rate limit, no retry on a refused password.
 - Names, messages and documentation in English, French, German and Spanish.
 
-[Unreleased]: https://github.com/guim31/gladys-powerfox/commits/main
+[Unreleased]: https://github.com/guim31/gladys-powerfox/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/guim31/gladys-powerfox/releases/tag/v1.0.1
