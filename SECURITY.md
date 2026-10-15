@@ -30,6 +30,17 @@ Gladys before reporting a problem.
 
 In scope: the code of this repository and the Docker image it publishes.
 
+What the integration handles:
+
+- **Secrets**: the e-mail and the password of the powerfox account. They are
+  stored by Gladys in the configuration of the integration (the password as a
+  `secret` field), sent only to `https://backend.powerfox.energy` in an HTTP
+  Basic header, and never written to the logs, to an error message or to disk.
+- **`/data`**: nothing. The integration keeps no state on disk.
+- **Network**: outgoing HTTPS to `backend.powerfox.energy` only (read-only
+  requests: device list, current reading, daily report). No listening port, no
+  local network access.
+
 Out of scope: Gladys Assistant itself (see its
 [security policy](https://github.com/GladysAssistant/Gladys/security/policy)),
-and the third-party services and devices the integration talks to.
+the powerfox cloud and the poweropti readers.

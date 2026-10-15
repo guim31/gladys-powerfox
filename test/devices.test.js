@@ -1,240 +1,136 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  DEVICE_FEATURE_CATEGORIES,
-  DEVICE_FEATURE_TYPES,
-  DEVICE_POLL_FREQUENCIES,
-  DEVICE_TRANSPORTS,
-} from '@gladysassistant/integration-sdk';
 import { createFakeGladys } from '@gladysassistant/integration-sdk/testing';
-import {
-  DEVICE_BLUEPRINTS,
-  buildDiscoveredDevices,
-  buildTransportEntries,
-  createPoller,
-  findBlueprintByDevice,
-  identifyDevice,
-} from '../src/devices/index.js';
-import { simulateLanSession } from '../src/devices/plug.js';
 import { normalizeConfig } from '../src/config.js';
+import {
+  buildDevice,
+  deviceName,
+  featureSpecs,
+  gasReading,
+  readingStates,
+} from '../src/devices.js';
+import { parseCurrent, parseDevices, parseReport } from '../src/powerfox/model.js';
+import { ACCOUNT, IDS, fixture } from './helpers/fakePowerfox.js';
 
 const gladys = createFakeGladys();
-const config = normalizeConfig();
+const meters = Object.fromEntries(
+  parseDevices(fixture('all-types')).map((meter) => [meter.id, meter]),
+);
+const config = normalizeConfig(ACCOUNT);
+const keys = (meter) => featureSpecs(meter).map((spec) => spec.key);
+const spec = (meter, key) => featureSpecs(meter).find((item) => item.key === key);
 
-test('every blueprint exposes the required shape', () => {
-  for (const bp of DEVICE_BLUEPRINTS) {
-    assert.equal(typeof bp.key, 'string', 'key must be a string');
-    assert.equal(typeof bp.deviceExternalId, 'function', 'deviceExternalId must be a function');
-    assert.equal(typeof bp.buildDevice, 'function', 'buildDevice must be a function');
-  }
-});
-
-test('buildDiscoveredDevices returns one payload per blueprint', () => {
-  const devices = buildDiscoveredDevices(gladys, config);
-  assert.equal(devices.length, DEVICE_BLUEPRINTS.length);
-  for (const device of devices) {
-    assert.equal(typeof device.name, 'string');
-    assert.ok(device.external_id, 'each device has an external_id');
-    assert.ok(Array.isArray(device.features) && device.features.length > 0);
-  }
-});
-
-test('Gladys accepts the discovery payload', async () => {
-  // The SDK fake checks the payload like the host API does: external_id
-  // prefix, known category/type/unit, poll_frequency... A refusal is a 400
-  // for the WHOLE list, so no device would show up in the Discovery tab.
-  const fresh = createFakeGladys();
-  await fresh.publishDiscoveredDevices(buildDiscoveredDevices(fresh, config));
-  assert.equal(fresh.fake.discoveredDevices.length, DEVICE_BLUEPRINTS.length);
-});
-
-test('Gladys polls exactly the devices that implement onPoll', () => {
-  const frequencies = Object.values(DEVICE_POLL_FREQUENCIES);
-  for (const bp of DEVICE_BLUEPRINTS) {
-    const device = bp.buildDevice(gladys, config);
-    if (typeof bp.onPoll === 'function') {
-      assert.equal(device.should_poll, true, `${bp.key}: without should_poll, never polled`);
-      assert.ok(frequencies.includes(device.poll_frequency), `${bp.key}: invalid poll_frequency`);
-    } else {
-      assert.notEqual(device.should_poll, true, `${bp.key}: polled for nothing`);
-    }
-  }
-});
-
-test('the poller reads a device at the refresh interval of the config', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'] });
-  const fresh = createFakeGladys();
-  const pollDevice = createPoller();
-  const plug = {
-    external_id: DEVICE_BLUEPRINTS.find((bp) => bp.key === 'plug').deviceExternalId(fresh),
-  };
-  const everyFiveMinutes = normalizeConfig({ poll_frequency: 300 });
-
-  assert.equal(await pollDevice(fresh, plug, everyFiveMinutes), true, 'the first poll reads');
-  for (let minute = 1; minute < 5; minute += 1) {
-    t.mock.timers.tick(DEVICE_POLL_FREQUENCIES.EVERY_MINUTES);
-    assert.equal(
-      await pollDevice(fresh, plug, everyFiveMinutes),
-      false,
-      `skipped at ${minute} min`,
-    );
-  }
-  // Gladys' tick may land a little early: the read is still due.
-  t.mock.timers.tick(DEVICE_POLL_FREQUENCIES.EVERY_MINUTES - 50);
-  assert.equal(await pollDevice(fresh, plug, everyFiveMinutes), true, 'read again at 5 min');
-});
-
-test('the poller retries a failed read at the next poll', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'] });
-  const pollDevice = createPoller();
-  const station = {
-    external_id: DEVICE_BLUEPRINTS.find((bp) => bp.key === 'weather-station').deviceExternalId(
-      gladys,
-    ),
-  };
-  t.mock.method(globalThis, 'fetch', async () => {
-    throw new Error('network down');
-  });
-  await assert.rejects(pollDevice(gladys, station, config), /network down/);
-
-  globalThis.fetch.mock.mockImplementation(async () => ({
-    ok: true,
-    json: async () => ({ current: { temperature_2m: 21.4, relative_humidity_2m: 55 } }),
-  }));
-  t.mock.timers.tick(DEVICE_POLL_FREQUENCIES.EVERY_MINUTES);
-  assert.equal(await pollDevice(gladys, station, config), true, 'not delayed by the failure');
-  assert.equal(gladys.fake.lastState(`${station.external_id}:temperature`), 21.4);
-});
-
-test('the poller ignores a device that has nothing to poll', async () => {
-  const pollDevice = createPoller();
-  const switchId = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'switch').deviceExternalId(gladys);
-  assert.equal(await pollDevice(gladys, { external_id: switchId }, config), false);
-  assert.equal(await pollDevice(gladys, { external_id: 'does-not-exist' }, config), false);
-});
-
-test('an idle plug publishes its 0 W once, then only as a heartbeat', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'] });
-  const fresh = createFakeGladys();
-  const plug = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'plug');
-  await plug.onPoll(fresh, config);
-  await plug.onPoll(fresh, config);
-  assert.equal(fresh.fake.states.length, 1, 'an unchanged value is not sent again');
-  t.mock.timers.tick(30 * 60 * 1000);
-  await plug.onPoll(fresh, config);
-  assert.equal(fresh.fake.states.length, 2, 're-sent after 30 minutes');
-});
-
-test('device external_ids are unique across the catalog', () => {
-  const devices = buildDiscoveredDevices(gladys, config);
-  const ids = devices.map((d) => d.external_id);
-  assert.equal(new Set(ids).size, ids.length, 'no two devices may share an external_id');
-});
-
-test('findBlueprintByDevice routes an external_id back to its owner blueprint', () => {
-  for (const bp of DEVICE_BLUEPRINTS) {
-    const external_id = bp.deviceExternalId(gladys);
-    const found = findBlueprintByDevice(gladys, { external_id });
-    assert.equal(found, bp);
-  }
-});
-
-test('findBlueprintByDevice returns undefined for an unknown device', () => {
-  const found = findBlueprintByDevice(gladys, { external_id: 'does-not-exist' });
-  assert.equal(found, undefined);
-});
-
-test('manifest action keys are unique across blueprints', () => {
-  const keys = DEVICE_BLUEPRINTS.flatMap((bp) => Object.keys(bp.actions ?? {}));
-  assert.equal(new Set(keys).size, keys.length, 'no two blueprints may register the same action');
-});
-
-test('the camera declares a camera/image feature', () => {
-  const cameraBlueprint = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'camera');
-  const device = cameraBlueprint.buildDevice(gladys, config);
-  const imageFeature = device.features.find((f) => f.category === DEVICE_FEATURE_CATEGORIES.CAMERA);
-  assert.ok(imageFeature, 'the camera must carry a camera feature');
-  assert.equal(imageFeature.type, DEVICE_FEATURE_TYPES.CAMERA.IMAGE);
-  assert.equal(imageFeature.read_only, true);
-});
-
-test('onGetImage resolves a base64 JPEG under the 150 KB limit', async () => {
-  const cameraBlueprint = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'camera');
-  const image = await cameraBlueprint.onGetImage(gladys, {
-    device: { external_id: cameraBlueprint.deviceExternalId(gladys) },
-    config,
-  });
-  assert.match(image, /^image\/jpg;base64,/);
-  assert.ok(image.length <= 150 * 1024, 'the image must stay under 150 KB');
-});
-
-test('buildTransportEntries reports one valid entry per dual-channel device', () => {
-  const entries = buildTransportEntries(gladys, config);
-  assert.ok(entries.length > 0, 'the demo plug reports its transport');
-  const validValues = Object.values(DEVICE_TRANSPORTS);
-  for (const entry of entries) {
-    assert.ok(entry.external_id, 'each entry targets a device external_id');
-    assert.ok(validValues.includes(entry.transport), `invalid transport: ${entry.transport}`);
-  }
-});
-
-test('the demo plug honors the GLADYS_PREFER_LOCAL preference', () => {
-  const local = buildTransportEntries(gladys, normalizeConfig({ GLADYS_PREFER_LOCAL: true }));
-  const cloud = buildTransportEntries(gladys, normalizeConfig({ GLADYS_PREFER_LOCAL: false }));
-  const plugId = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'plug').deviceExternalId(gladys);
-  assert.equal(local.find((e) => e.external_id === plugId).transport, DEVICE_TRANSPORTS.LOCAL);
-  assert.equal(cloud.find((e) => e.external_id === plugId).transport, DEVICE_TRANSPORTS.CLOUD);
-});
-
-test('nominal transport entries never carry a leftover degraded flag', () => {
-  const entries = buildTransportEntries(gladys, config);
-  for (const entry of entries) {
-    assert.equal(entry.degraded, undefined, 'nominal entries must clear the degraded state');
-  }
-});
-
-test('the plug reports a degraded cloud fallback when the LAN session is refused', () => {
-  const plugId = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'plug').deviceExternalId(gladys);
-  simulateLanSession(false);
-  try {
-    const entries = buildTransportEntries(gladys, normalizeConfig({ GLADYS_PREFER_LOCAL: true }));
-    const entry = entries.find((e) => e.external_id === plugId);
-    assert.equal(entry.transport, DEVICE_TRANSPORTS.CLOUD, 'falls back to cloud');
-    assert.equal(entry.degraded, true, 'the fallback is flagged degraded');
-    assert.ok(entry.message.en, 'the reason carries at least the mandatory `en` text');
-    assert.ok(entry.message.en.length <= 200, 'tooltip messages are capped at 200 characters');
-  } finally {
-    simulateLanSession(true);
-  }
-});
-
-test('identifyDevice signals a device that implements identify', async () => {
-  const lightId = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'light').deviceExternalId(gladys);
-  const message = await identifyDevice(gladys, lightId, config);
-  assert.match(message.en, /signalling/);
-  assert.ok(message.fr, 'the message is multi-language');
-});
-
-test('identifyDevice explains when the device has no way to signal itself', async () => {
-  const weatherId = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'weather-station').deviceExternalId(
-    gladys,
+test('the external ids are built from the powerfox DeviceId, never from a name', () => {
+  const device = buildDevice(gladys, meters[IDS.prosumer], config);
+  assert.equal(device.external_id, `ext:test-integration:poweropti:${IDS.prosumer}`);
+  assert.equal(device.features[0].external_id, `${device.external_id}:power`);
+  // Renaming the reader in the powerfox app changes nothing.
+  const renamed = buildDevice(gladys, { ...meters[IDS.prosumer], name: 'Keller' }, config);
+  assert.deepEqual(
+    renamed.features.map((feature) => feature.external_id),
+    device.features.map((feature) => feature.external_id),
   );
-  const message = await identifyDevice(gladys, weatherId, config);
-  assert.match(message.en, /no way to signal/);
 });
 
-test('the test_weather action returns a multi-language message', async () => {
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({
-    ok: true,
-    json: async () => ({ current: { temperature_2m: 21.4, relative_humidity_2m: 55 } }),
+test('a bidirectional electricity meter: signed grid power, consumption and feed-in indexes', () => {
+  const meter = meters[IDS.prosumer];
+  assert.deepEqual(keys(meter), ['power', 'energy_import', 'energy_export', 'outdated']);
+  assert.deepEqual(
+    { ...spec(meter, 'power') },
+    {
+      key: 'power',
+      category: 'grid-sensor',
+      type: 'power',
+      unit: 'watt',
+      min: -20000,
+      max: 20000,
+    },
+  );
+  // The core derives the energy tracking (30-minute consumption, cost) from
+  // an energy-sensor index, the production tracking from a production index.
+  assert.equal(spec(meter, 'energy_import').category, 'energy-sensor');
+  assert.equal(spec(meter, 'energy_import').type, 'index');
+  assert.equal(spec(meter, 'energy_import').unit, 'kilowatt-hour');
+  assert.equal(spec(meter, 'energy_export').category, 'energy-production-sensor');
+  assert.equal(spec(meter, 'energy_export').type, 'index');
+});
+
+test('a consumption-only electricity meter: positive power, no feed-in index', () => {
+  const meter = meters[IDS.consumer];
+  assert.deepEqual(keys(meter), ['power', 'energy_import', 'outdated']);
+  assert.equal(spec(meter, 'power').category, 'energy-sensor');
+  assert.equal(spec(meter, 'power').min, 0);
+});
+
+test('water meters have the indexes of their type', () => {
+  assert.deepEqual(keys(meters[IDS.coldWater]), ['cold_water', 'outdated']);
+  assert.deepEqual(keys(meters[IDS.hotWater]), ['warm_water', 'outdated']);
+  assert.deepEqual(keys(meters[IDS.coldHotWater]), ['cold_water', 'warm_water', 'outdated']);
+  assert.equal(spec(meters[IDS.coldWater], 'cold_water').unit, 'cubicmeter');
+});
+
+test('the heat energy is a counter: Gladys must not count it as electricity', () => {
+  const meter = meters[IDS.heat];
+  assert.deepEqual(keys(meter), ['heat_energy', 'heat_volume', 'outdated']);
+  assert.notEqual(spec(meter, 'heat_energy').category, 'energy-sensor');
+  assert.equal(spec(meter, 'heat_energy').category, 'counter-sensor');
+  assert.equal(spec(meter, 'heat_energy').unit, 'kilowatt-hour');
+});
+
+test('a gas meter publishes the daily report: today, this hour, cost', () => {
+  const meter = meters[IDS.gas];
+  assert.deepEqual(keys(meter), ['gas_today', 'gas_this_hour', 'gas_cost_today']);
+  const states = readingStates(meter, gasReading(parseReport(fixture('gas-report'))));
+  assert.deepEqual(states, [
+    { key: 'gas_today', value: 11.32 },
+    { key: 'gas_this_hour', value: 0.12 },
+    { key: 'gas_cost_today', value: 17.14 },
+  ]);
+});
+
+test('the states of a reading: only the features of the device, the stale flag as 0/1', () => {
+  const states = readingStates(meters[IDS.consumer], parseCurrent(fixture('power-meter'), 'power'));
+  assert.deepEqual(states, [
+    { key: 'power', value: 111 },
+    { key: 'energy_import', value: 1111.111 },
+    { key: 'outdated', value: 0 },
+  ]);
+  const stale = readingStates(meters[IDS.coldWater], {
+    outdated: true,
+    values: { cold_water: null },
   });
-  try {
-    const weatherStation = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'weather-station');
-    const message = await weatherStation.actions.test_weather(gladys, { fields: {}, config });
-    assert.match(message.en, /21\.4/);
-    assert.match(message.fr, /21\.4/);
-  } finally {
-    globalThis.fetch = realFetch;
-  }
+  assert.deepEqual(stale, [{ key: 'outdated', value: 1 }]);
+});
+
+test('the structure depends on the reader type only, never on a reading', () => {
+  // A prosumer meter whose feed-in total is still 0 keeps its feed-in index.
+  assert.deepEqual(keys(meters[IDS.prosumer]), [
+    'power',
+    'energy_import',
+    'energy_export',
+    'outdated',
+  ]);
+  const states = readingStates(
+    meters[IDS.prosumer],
+    parseCurrent(fixture('power-meter-invalid'), 'power'),
+  );
+  assert.ok(!states.some((state) => state.key === 'energy_export'), 'a 0 total is not published');
+});
+
+test('the device names: the powerfox name, or the meter type and the end of the id', () => {
+  assert.equal(deviceName(meters[IDS.prosumer], 'fr'), 'Wohnung unten');
+  assert.equal(deviceName(meters[IDS.consumer], 'fr'), 'Compteur électrique e4f9');
+  assert.equal(deviceName(meters[IDS.coldWater], 'de'), 'Wasserzähler e4f7');
+});
+
+test('the polling fields follow the refresh interval, gas every 5 minutes at most', () => {
+  const at = (interval, id) =>
+    buildDevice(gladys, meters[id], normalizeConfig({ ...ACCOUNT, refresh_interval: interval }))
+      .poll_frequency;
+  assert.equal(at('10', IDS.prosumer), 10_000);
+  assert.equal(at('15', IDS.prosumer), 15_000);
+  assert.equal(at('30', IDS.prosumer), 30_000);
+  assert.equal(at('60', IDS.prosumer), 60_000);
+  assert.equal(at('300', IDS.prosumer), 60_000);
+  assert.equal(at('10', IDS.gas), 60_000);
 });
