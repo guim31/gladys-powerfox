@@ -33,7 +33,7 @@ clipped on electricity, gas, water and heat meters, widely used in Germany and A
 
 ## Requirements
 
-- Gladys Assistant **5.1.0** or later (5.2 recommended: energy tracking of external integrations).
+- Gladys Assistant **5.3.0** or later (catalog countries; it includes the energy tracking of external integrations).
 - A poweropti set up in the powerfox app, and the e-mail and password of that account.
 - Internet access from Gladys (`backend.powerfox.energy`).
 

@@ -74,7 +74,7 @@ test/fixtures/powerfox/           recorded API responses (python-powerfox, MIT),
   catalog `description` holds 10 to 100 characters per language. A field the
   older cores do not know needs a higher `gladys_version` minimum
   (`categories`: 4.86.0; `widgets`, `scene_triggers`, `scene_actions`,
-  `type: "provider"`: 5.1.0). `test/manifest.test.js` ties the manifest to the
+  `type: "provider"`: 5.1.0; `keywords`, `countries`: 5.3.0). `test/manifest.test.js` ties the manifest to the
   code (defaults, action, scene and widget handlers): change both sides
   together.
 - **User-facing text** exists in four languages (English, French, German with
