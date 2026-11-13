@@ -26,7 +26,7 @@ anything on your meters or in your powerfox account.
 
 ## Requirements
 
-- Gladys Assistant **5.1.0** or later (5.2 recommended for the energy tracking).
+- Gladys Assistant **5.3.0** or later (catalog countries; it includes the energy tracking).
 - A poweropti reader set up in the **powerfox app**, and the e-mail and password of that powerfox account.
 - Internet access from Gladys: the readings come from the powerfox cloud (`backend.powerfox.energy`).
 

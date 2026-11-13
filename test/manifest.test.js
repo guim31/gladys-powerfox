@@ -225,3 +225,8 @@ test('the select options of the configuration match the code', async () => {
   assert.deepEqual(options('refresh_interval'), REFRESH_INTERVALS);
   assert.deepEqual(options('language'), LANGUAGES);
 });
+
+test('the catalog countries: Germany, Austria and Switzerland, which needs Gladys >= 5.3.0', () => {
+  assert.deepEqual(manifest.countries, ['DE', 'AT', 'CH']);
+  assert.ok(isAtLeast(minGladysVersion(), [5, 3, 0]), 'countries needs Gladys 5.3.0');
+});

@@ -28,7 +28,7 @@ etwas an deinen Zählern oder in deinem powerfox-Konto.
 
 ## Voraussetzungen
 
-- Gladys Assistant **5.1.0** oder neuer (5.2 empfohlen für das Energie-Tracking).
+- Gladys Assistant **5.3.0** oder neuer (Länder im Katalog; enthält das Energie-Tracking).
 - Ein in der **powerfox-App** eingerichteter poweropti und die E-Mail-Adresse und das Passwort dieses
   powerfox-Kontos.
 - Internetzugang für Gladys: Die Messwerte kommen aus der powerfox-Cloud (`backend.powerfox.energy`).

@@ -28,7 +28,7 @@ sus contadores ni en su cuenta powerfox.
 
 ## Requisitos
 
-- Gladys Assistant **5.1.0** o posterior (5.2 recomendado para el seguimiento de energía).
+- Gladys Assistant **5.3.0** o posterior (países del catálogo; incluye el seguimiento de energía).
 - Un lector poweropti configurado en la **aplicación powerfox**, y el correo electrónico y la contraseña de
   esa cuenta powerfox.
 - Acceso a Internet desde Gladys: las lecturas vienen de la nube powerfox (`backend.powerfox.energy`).
